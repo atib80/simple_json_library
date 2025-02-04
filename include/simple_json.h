@@ -46,11 +46,11 @@ namespace simple_json {
 		while (src[i])
 			++i;
 
-		return i;		
+		return i;
 	}
 
 	template <char_type CharType, size_t N>
-	constexpr const size_t len(const CharType (&src)[N]) noexcept {
+	constexpr const size_t len(const CharType(&src)[N]) noexcept {
 		size_t i{};
 
 		while (src[i] && i < N)
@@ -59,7 +59,7 @@ namespace simple_json {
 		return i;
 	}
 
-	enum class json_type {null_t, boolean_t, number_t, string_t, array_t, object_t};
+	enum class json_type { null_t, boolean_t, number_t, string_t, array_t, object_t };
 
 	template<char_type CharType>
 	class Json {
@@ -148,7 +148,7 @@ namespace simple_json {
 			return is;
 		}
 
-		std::optional<std::reference_wrapper<JSONValue>> get_json_element(std::basic_string<CharType> key) const {
+		std::optional<std::reference_wrapper<JSONValue>> get_json_element(const std::basic_string<CharType>& key) const {
 			if (!is_json_object(value)) return std::nullopt;
 			try {
 				const auto& element = value.get<std::to_underlying(json_type::object_t)>();
@@ -163,7 +163,7 @@ namespace simple_json {
 
 		const json_type& get_json_element_type(const JSONValue& json_element) const noexcept {
 
-			if (std::get_if<std::unordered_map<std::basic_string<CharType>, Json>>(&json_element))
+			if (get_if<std::unordered_map<std::basic_string<CharType>, Json>>(&json_element))
 				return json_type::object_t;
 
 			if (std::get_if<std::vector<Json>>(&json_element))
@@ -183,40 +183,34 @@ namespace simple_json {
 
 		// boolean predicate member functions for testing if specified json element is of certain JSON enum type (json_type)
 		bool is_json_object(const JSONValue& json_element) const noexcept {
-			const auto* value_ptr = std::get_if<std::unordered_map<std::basic_string<CharType>, Json>>(&json_element);
-			return value_ptr != nullptr;
+			return std::get_if<std::unordered_map<std::basic_string<CharType>, Json>>(&json_element) != nullptr;
 		}
 
 		bool is_json_array(const JSONValue& json_element) const noexcept {
-			const auto* value_ptr = std::get_if<std::vector<Json>>(&json_element);
-			return value_ptr != nullptr;
+			return std::get_if<std::vector<Json>>(&json_element) != nullptr;
 		}
 
 		bool is_json_string(const JSONValue& json_element) const noexcept {
-			const auto* value_ptr = std::get_if<std::basic_string<CharType>>(&json_element);
-			return value_ptr != nullptr;
+			return std::get_if<std::basic_string<CharType>>(&json_element) != nullptr;
 		}
 
 		bool is_json_number(const JSONValue& json_element) const noexcept {
-			const auto* value_ptr = std::get_if<double>(&json_element);
-			return value_ptr != nullptr;
+			return std::get_if<double>(&json_element) != nullptr;
 		}
 
 		bool is_json_boolean(const JSONValue& json_element) const noexcept {
-			const auto* value_ptr = std::get_if<bool>(&json_element);
-			return value_ptr != nullptr;
+			return std::get_if<bool>(&json_element) != nullptr;
 		}
 
 		bool is_json_null(const JSONValue& json_element) const noexcept {
-			const auto* value_ptr = std::get_if<std::nullptr_t>(&json_element);
-			return value_ptr != nullptr;
+			return std::get_if<std::nullptr_t>(&json_element) != nullptr;
 		}
 
 	private:
 		JSONValue value;
 
 		static Json parseValue(const std::basic_string<CharType>& str, size_t& pos) {
-			
+
 			skip_whitespace(str, pos);
 
 			if (pos >= str.size()) throw std::runtime_error("Unexpected end of json data!");
@@ -225,19 +219,19 @@ namespace simple_json {
 			if (str[pos] == static_cast<CharType>('[')) return parse_json_array(str, pos);
 			if (str[pos] == static_cast<CharType>('"')) return parse_json_string(str, pos);
 			if (std::isdigit(str[pos]) || str[pos] == DASH_CHAR) return parse_json_number(str, pos);
-			
-			if (str.compare(pos, TRUE_STRING_LEN, TRUE_STRING) == 0) { 
+
+			if (str.compare(pos, TRUE_STRING_LEN, TRUE_STRING) == 0) {
 				pos += TRUE_STRING_LEN;
-				return Json(true); 
+				return Json(true);
 			}
-			if (str.compare(pos, FALSE_STRING_LEN, FALSE_STRING) == 0) { 
-				pos += FALSE_STRING_LEN; 
-				return Json(false); 
+			if (str.compare(pos, FALSE_STRING_LEN, FALSE_STRING) == 0) {
+				pos += FALSE_STRING_LEN;
+				return Json(false);
 			}
-			
-			if (str.compare(pos, NULL_STRING_LEN, NULL_STRING) == 0) { 
-				pos += NULL_STRING_LEN; 
-				return Json(nullptr); 
+
+			if (str.compare(pos, NULL_STRING_LEN, NULL_STRING) == 0) {
+				pos += NULL_STRING_LEN;
+				return Json(nullptr);
 			}
 
 			throw std::runtime_error("Invalid json value!");
