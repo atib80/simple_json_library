@@ -1,4 +1,4 @@
-#include "include/simple_json.h"
+#include "simple_json.h"
 
 #include <fstream>
 #include <iostream>

@@ -6,3 +6,5 @@ set(CMAKE_CXX_STANDARD_REQUIRED 20)
 
 add_executable(SimpleJSONParser tests/main.cpp
         include/simple_json.h)
+
+target_include_directories(SimpleJSONParser PUBLIC include)
