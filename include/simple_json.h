@@ -7,41 +7,32 @@
 
 #include <array>
 #include <cctype>
-#include <functional>
-#include <iostream>
+#include <format>
 #include <optional>
 #include <ostream>
 #include <sstream>
-#include <stack>
+
 #include <stdexcept>
 #include <string>
-#include <tuple>
 #include <type_traits>
 #include <unordered_map>
-#include <unordered_set>
+#include <utility>
 #include <variant>
 #include <vector>
 
-namespace simple_json {
+namespace simple_json
+{
 
 template <typename T>
-concept char_type = std::is_same_v<T, char> || std::is_same_v<T, wchar_t>;
-
-template <typename CharType>
-struct delimiters_t {
-  static constexpr const CharType* value = "{}[]";
-};
-
-template <>
-struct delimiters_t<wchar_t> {
-  static constexpr const wchar_t* value = L"{}[]";
-};
-
-template <typename CharType>
-static constexpr const CharType* delimiters_v = delimiters_t<CharType>::value;
+concept char_type
+    = std::is_same_v<T, char> || std::is_same_v<T, wchar_t>
+      || std::is_same_v<T, char16_t> || std::is_same_v<T, char32_t>
+      || std::is_same_v<T, char8_t>;
 
 template <char_type CharType>
-constexpr const size_t len(const CharType* src) noexcept {
+constexpr size_t
+len (const CharType *src) noexcept
+{
   size_t i{};
 
   while (src[i])
@@ -51,7 +42,9 @@ constexpr const size_t len(const CharType* src) noexcept {
 }
 
 template <char_type CharType, size_t N>
-constexpr const size_t len(const CharType (&src)[N]) noexcept {
+constexpr size_t
+len (const CharType (&src)[N]) noexcept
+{
   size_t i{};
 
   while (src[i] && i < N)
@@ -60,9 +53,45 @@ constexpr const size_t len(const CharType (&src)[N]) noexcept {
   return i;
 }
 
-enum class status { success, fail };
+bool is_whitespace (char ch);
+void skip_whitespace (const std::string &str, size_t &pos);
 
-enum class json_type : unsigned {
+class Json;
+
+using JSONValue
+    = std::variant<std::nullptr_t, bool, double, std::string,
+                   std::vector<Json>, std::unordered_map<std::string, Json> >;
+
+struct result_type;
+
+result_type parse (const std::string &input);
+std::ostream &operator<< (std::ostream &os, const Json &json);
+std::istream &operator>> (std::istream &is, Json &json);
+
+result_type parseValue (const std::string &str, size_t &pos);
+result_type parse_json_object (const std::string &str, size_t &pos);
+result_type parse_json_array (const std::string &str, size_t &pos);
+result_type parse_json_string (const std::string &str, size_t &pos);
+result_type parse_json_number (const std::string &str, size_t &pos);
+void print_value (const JSONValue &val, std::ostream &os, int indent,
+                  int level);
+void print_helper (std::nullptr_t, std::ostream &os, int, int);
+void print_helper (bool b, std::ostream &os, int, int);
+void print_helper (double d, std::ostream &os, int, int);
+void print_helper (const std::string &s, std::ostream &os, int, int);
+void print_helper (const std::vector<Json> &json_array, std::ostream &os,
+                   int indent, int level);
+void print_helper (const std::unordered_map<std::string, Json> &json_object,
+                   std::ostream &os, int indent, int level);
+
+enum class status
+{
+  success,
+  fail
+};
+
+enum class json_type : unsigned
+{
   null_t,
   boolean_t,
   number_t,
@@ -71,568 +100,510 @@ enum class json_type : unsigned {
   object_t
 };
 
-template <char_type CharType>
-class Json {
- public:
-  using JSONValue =
-      std::variant<std::nullptr_t,
-                   bool,
-                   double,
-                   std::basic_string<CharType>,
-                   std::vector<Json>,
-                   std::unordered_map<std::basic_string<CharType>, Json>>;
+class Json
+{
+public:
+  constexpr explicit Json () : value{ nullptr } {}
+  constexpr explicit Json (std::nullptr_t) : value{ nullptr } {}
+  constexpr explicit Json (const bool b) : value{ b } {}
+  constexpr explicit Json (const int n) : Json(static_cast<double>(n)) {}
+  constexpr explicit Json (const double d) : value{ d } {}
+  constexpr explicit Json (const char* s) : value{ std::string{s} } {}
+  constexpr explicit Json (const std::string &s) : value{ s } {}
+  constexpr explicit Json (const std::vector<Json> &values) : value{ values } {}
+  constexpr explicit Json (std::vector<Json> &&values) : value{ std::move (values) } {}
+  // constexpr Json (const std::initializer_list<Json> values)
+  //     : value{ std::vector<Json> (values) } {}
+  explicit Json (const std::unordered_map<std::string, Json> &o) : value{ o } {}
+  explicit Json (std::unordered_map<std::string, Json> &&o) : value{ std::move (o) } {}
 
-  Json() = default;
-  Json(std::nullptr_t) : value{nullptr} {}
-  Json(const bool b) : value{b} {}
-  Json(const double d) : value{d} {}
-  Json(const std::basic_string<CharType>& s) : value{s} {}
-  Json(const CharType* s) : value{std::basic_string<CharType>(s)} {}
-  Json(const std::vector<Json>& v) : value{v} {}
-  Json(const std::unordered_map<std::basic_string<CharType>, Json>& o)
-      : value{o} {}
-
-  static Json parse(const std::basic_string<CharType>& input) {
-    size_t pos{};
-    return parseValue(input, pos);
+  std::optional<std::nullptr_t>
+  get_json_value_as_null () const
+  {
+    if (is_json_null ())
+      return std::make_optional (std::get<std::nullptr_t> (value));
+    return std::nullopt;
   }
 
-  std::basic_string<CharType> to_string(int indent = 0) const {
-    std::basic_ostringstream<CharType> oss;
-    print_value(value, oss, indent, 0);
-    return oss.str();
+  std::optional<bool>
+  get_json_value_as_bool () const
+  {
+    if (is_json_boolean ())
+      return std::make_optional (std::get<bool> (value));
+    return std::nullopt;
   }
 
-  friend std::basic_ostream<CharType>& operator<<(
-      std::basic_ostream<CharType>& os,
-      const Json& json) {
-    os << json.to_string(2);  // default indentation: 2 spaces
-    return os;
+  std::optional<double>
+  get_json_value_as_number () const
+  {
+    if (is_json_number ())
+      return std::make_optional (std::get<double> (value));
+    return std::nullopt;
   }
 
-  friend std::basic_istream<CharType>& operator>>(
-      std::basic_istream<CharType>& is,
-      Json<CharType>& json) {
-    std::stack<CharType> open_curly_braces;
-    std::stack<CharType> open_brackets;
-    bool is_found_open_curly_brace{};
+  std::optional<std::reference_wrapper<std::string> >
+  get_json_value_as_string ()
+  {
+    if (is_json_string ())
+      return std::make_optional<std::reference_wrapper<std::string> > (
+          std::ref (std::get<std::string> (value)));
+    return std::nullopt;
+  }
 
-    std::basic_string<CharType> buffer;
-    for (std::basic_string<CharType> line; std::getline(is, line);) {
-      size_t pos{};
-      skip_whitespace(line, pos);
-      if (pos == line.size())
-        continue;
-      if (static_cast<CharType>('{') == line[pos]) {
-        open_curly_braces.push(static_cast<CharType>('{'));
-        is_found_open_curly_brace = true;
-        buffer = std::move(line);
-        break;
+  std::optional<std::reference_wrapper<const std::string> >
+  get_json_value_as_string () const
+  {
+    if (is_json_string ())
+      return std::make_optional<std::reference_wrapper<const std::string> > (
+          std::cref (std::get<std::string> (value)));
+    return std::nullopt;
+  }
+
+  std::optional<std::reference_wrapper<std::vector<Json> > >
+  get_json_value_as_array ()
+  {
+    if (is_json_array ())
+      return std::make_optional<std::reference_wrapper<std::vector<Json> > > (
+          std::ref (std::get<std::vector<Json> > (value)));
+    return std::nullopt;
+  }
+
+  std::optional<std::reference_wrapper<const std::vector<Json> > >
+  get_json_value_as_array () const
+  {
+    if (is_json_array ())
+      return std::make_optional<
+          std::reference_wrapper<const std::vector<Json> > > (
+          std::cref (std::get<std::vector<Json> > (value)));
+    return std::nullopt;
+  }
+
+  std::optional<
+      std::reference_wrapper<std::unordered_map<std::string, Json> > >
+  get_json_value_as_object ()
+  {
+    if (is_json_object ())
+      return std::make_optional<
+          std::reference_wrapper<std::unordered_map<std::string, Json> > > (
+          std::ref (std::get<std::unordered_map<std::string, Json> > (value)));
+    return std::nullopt;
+  }
+
+  std::optional<
+      std::reference_wrapper<const std::unordered_map<std::string, Json> > >
+  get_json_value_as_object () const
+  {
+    if (is_json_object ())
+      return std::make_optional<std::reference_wrapper<
+          const std::unordered_map<std::string, Json> > > (
+          std::cref (
+              std::get<std::unordered_map<std::string, Json> > (value)));
+    return std::nullopt;
+  }
+
+  const JSONValue&
+  get_json_value_as_variant () const noexcept
+  {
+    return value;
+  }
+
+  // template <typename T>
+  // const T &
+  // get () const
+  // {
+  //   return std::get<T> (value);
+  // }
+
+  std::string
+  to_string (int indent = 0) const
+  {
+    std::ostringstream oss;
+    print_value (value, oss, indent, 0);
+    return oss.str ();
+  }
+
+  constexpr double
+  to_number () const noexcept
+  {
+    if (is_json_number ())
+      return std::get<double> (value);
+    return std::numeric_limits<double>::quiet_NaN ();
+  }
+
+  constexpr bool
+  to_bool () const noexcept
+  {
+    return is_json_boolean () ? std::get<bool> (value) : false;
+  }
+
+  Json &
+  get_json_element_if_exists (const std::string &key)
+  {
+    if (!is_json_object ())
+      throw std::invalid_argument ("JSON element is not a JSON object!");
+    auto &parent_element
+        = std::get<std::unordered_map<std::string, Json> > (value);
+    if (!parent_element.contains (key))
+      throw std::out_of_range{ std::format (
+          "JSON element with key {} is not found!", key) };
+    return parent_element.at (key);
+  }
+
+  const Json &
+  get_json_element_if_exists (const std::string &key) const
+  {
+
+    if (!is_json_object ())
+      throw std::invalid_argument ("JSON element is not a JSON object!");
+    const auto &parent_element
+        = std::get<std::unordered_map<std::string, Json> > (value);
+    if (!parent_element.contains (key))
+      throw std::out_of_range{ std::format (
+          "JSON element with key {} is not found!", key) };
+    return parent_element.at (key);
+  }
+
+  Json &
+  get_json_element (const std::string &key)
+  {
+    static Json null_json{ nullptr };
+    if (!is_json_object ())
+      return null_json;
+    auto &parent_element
+        = std::get<std::unordered_map<std::string, Json> > (value);
+    if (!parent_element.contains (key))
+      parent_element[key] = null_json;
+    return parent_element[key];
+  }
+
+  const Json &
+  get_json_element (const std::string &key) const
+  {
+    static const Json null_json{ nullptr };
+    if (!is_json_object ())
+      return null_json;
+    const auto &parent_element
+        = std::get<std::unordered_map<std::string, Json> > (value);
+    if (parent_element.contains (key))
+      return parent_element.at (key);
+    return null_json;
+  }
+
+  std::optional<
+      std::reference_wrapper<const std::unordered_map<std::string, Json> > >
+  get_json_element_as_json_object (const std::string &key,
+                                   std::ostream *error_stream = nullptr) const
+  {
+
+    if (!is_json_object ())
+      {
+        if (key.empty () && is_json_object ())
+          return std::make_optional (std::cref (
+              std::get<std::unordered_map<std::string, Json> > (value)));
+        return std::nullopt;
       }
-    }
+    try
+      {
+        const auto &parent_element
+            = std::get<std::unordered_map<std::string, Json> > (value);
 
-    if (!is_found_open_curly_brace)
-      throw std::invalid_argument(
-          "Invalid JSON syntax: missing first open curly brace!");
-
-    for (std::basic_string<CharType> line; std::getline(is, line);) {
-      size_t pos{};
-      skip_whitespace(line, pos);
-      if (pos == line.size())
-        continue;
-      buffer += line;
-
-      for (; (pos = line.find_first_of(delimiters_v<CharType>, pos)) !=
-             std::string::npos;
-           ++pos) {
-        if (static_cast<CharType>('{') == line[pos]) {
-          open_curly_braces.push(static_cast<CharType>('{'));
-        } else if (static_cast<CharType>('[') == line[pos]) {
-          open_brackets.push(static_cast<CharType>('['));
-        } else if (static_cast<CharType>('}') == line[pos]) {
-          if (open_curly_braces.empty())
-            throw std::invalid_argument(
-                "Invalid JSON syntax: too many close curly braces!");
-          open_curly_braces.pop();
-          if (open_curly_braces.empty())
-            break;
-        } else if (static_cast<CharType>(']') == line[pos]) {
-          if (open_brackets.empty())
-            throw std::invalid_argument(
-                "Invalid JSON syntax: too many close brackets!");
-          open_brackets.pop();
-        }
+        if (parent_element.contains (key))
+          {
+            const auto &child_element = parent_element.at (key);
+            return std::make_optional (
+                std::cref (std::get<std::unordered_map<std::string, Json> > (
+                    child_element.value)));
+          }
       }
-    }
+    catch (const std::exception &ex)
+      {
+        if (error_stream)
+          {
+            *error_stream << ex.what ();
+          }
+      }
 
-    if (!open_curly_braces.empty() || !open_brackets.empty())
-      throw std::invalid_argument(
-          "Invalid JSON syntax too many open curly braces or brackets!");
-
-    json = parse(buffer);
-
-    return is;
+    return {};
   }
 
-  std::optional<std::reference_wrapper<JSONValue>> get_json_element(
-      const std::basic_string<CharType>& key,
-      std::ostream* error_stream = nullptr) const {
-    if (!is_json_object(value))
-      return std::nullopt;
-    try {
-      const auto& parent_element =
-          value.template get<static_cast<unsigned>(json_type::object_t)>();
-      if (parent_element.contains(key))
-        return std::make_optional<std::reference_wrapper<JSONValue>>(
-            std::cref(parent_element.at(key)));
-    } catch (const std::exception& ex) {
-      if (error_stream) {
-        *error_stream << ex.what();
+  std::optional<std::reference_wrapper<const std::vector<Json> > >
+  get_json_element_as_json_array (const std::string &key,
+                                  std::ostream *error_stream = nullptr) const
+  {
+    if (!is_json_object ())
+      {
+        if (key.empty () && is_json_array ())
+          return std::make_optional (
+              std::cref (std::get<std::vector<Json> > (value)));
+        return std::nullopt;
       }
-    }
+    try
+      {
+        const auto &parent_element
+            = std::get<std::unordered_map<std::string, Json> > (value);
+
+        if (parent_element.contains (key))
+          {
+            const auto &child_element = parent_element.at (key);
+            return std::make_optional (std::cref (
+                std::get<std::vector<Json> > (child_element.value)));
+          }
+      }
+    catch (const std::exception &ex)
+      {
+        if (error_stream)
+          {
+            *error_stream << ex.what ();
+          }
+      }
+
+    return {};
+  }
+
+  std::optional<std::string>
+  get_json_element_as_json_string (const std::string &key,
+                                   std::ostream *error_stream = nullptr) const
+  {
+    static constexpr std::nullptr_t null_value{};
+    if (!is_json_object ())
+      {
+        if (key.empty () && is_json_string ())
+          return std::make_optional<std::string> (
+              std::get<std::string> (value));
+        return std::nullopt;
+      }
+    try
+      {
+        const auto &parent_element
+            = std::get<std::unordered_map<std::string, Json> > (value);
+
+        if (parent_element.contains (key))
+          {
+            const auto &child_element = parent_element.at (key);
+            return std::make_optional (
+                std::get<std::string> (child_element.value));
+          }
+      }
+    catch (const std::exception &ex)
+      {
+        if (error_stream)
+          {
+            *error_stream << ex.what ();
+          }
+      }
+
+    return null_value;
+  }
+
+  std::optional<double>
+  get_json_element_as_json_number (const std::string &key,
+                                   std::ostream *error_stream = nullptr) const
+  {
+
+    if (!is_json_object ())
+      {
+        if (key.empty () && is_json_number ())
+          return std::make_optional<double> (std::get<double> (value));
+        return std::nullopt;
+      }
+    try
+      {
+        const auto &parent_element
+            = std::get<std::unordered_map<std::string, Json> > (value);
+
+        if (parent_element.contains (key))
+          {
+            const auto &child_element = parent_element.at (key);
+            return std::make_optional<double> (
+                std::get<double> (child_element.value));
+          }
+      }
+    catch (const std::exception &ex)
+      {
+        if (error_stream)
+          {
+            *error_stream << ex.what ();
+          }
+      }
 
     return std::nullopt;
   }
 
-  std::optional<std::reference_wrapper<
-      std::unordered_map<std::basic_string<CharType>, JSONValue>>>
-  get_json_element_as_json_object(const std::basic_string<CharType>& key,
-                                  std::ostream* error_stream = nullptr) const {
-    if (!is_json_object(value))
-      return std::nullopt;
-    try {
-      const auto& parent_element =
-          value.template get<static_cast<unsigned>(json_type::object_t)>();
+  std::optional<bool>
+  get_json_element_as_json_boolean (const std::string &key,
+                                    std::ostream *error_stream = nullptr) const
+  {
+    if (!is_json_object ())
+      {
+        if (key.empty () && is_json_boolean ())
+          return std::make_optional<bool> (std::get<bool> (value));
+        return std::nullopt;
+      }
+    try
+      {
+        const auto &parent_element
+            = std::get<std::unordered_map<std::string, Json> > (value);
 
-      if (parent_element.contains(key)) {
-        const auto& child_element = parent_element.at(key);
-        return std::make_optional<std::reference_wrapper<
-            std::unordered_map<std::basic_string<CharType>, JSONValue>>>(
-            std::cref(child_element.template get<static_cast<unsigned>(
-                          json_type::object_t)>()));
+        if (parent_element.contains (key))
+          {
+            const auto &child_element = parent_element.at (key);
+            return std::make_optional<bool> (
+                std::get<bool> (child_element.value));
+          }
       }
-    } catch (const std::exception& ex) {
-      if (error_stream) {
-        *error_stream << ex.what();
+    catch (const std::exception &ex)
+      {
+        if (error_stream)
+          {
+            *error_stream << ex.what ();
+          }
       }
-    }
 
     return std::nullopt;
   }
 
-  std::optional<std::reference_wrapper<std::vector<JSONValue>>>
-  get_json_element_as_json_array(const std::basic_string<CharType>& key,
-                                 std::ostream* error_stream = nullptr) const {
-    if (!is_json_object(value))
-      return std::nullopt;
-    try {
-      const auto& parent_element =
-          value.template get<static_cast<unsigned>(json_type::object_t)>();
+  std::optional<std::nullptr_t>
+  get_json_element_as_json_null (const std::string &key,
+                                 std::ostream *error_stream = nullptr) const
+  {
+    if (!is_json_object ())
+      {
+        if (key.empty () && is_json_null ())
+          return std::make_optional<std::nullptr_t> (nullptr);
+        return std::nullopt;
+      }
+    try
+      {
+        const auto &parent_element
+            = std::get<std::unordered_map<std::string, Json> > (value);
 
-      if (parent_element.contains(key)) {
-        const auto& child_element = parent_element.at(key);
-        return std::make_optional<
-            std::reference_wrapper<std::vector<JSONValue>>>(std::cref(
-            child_element
-                .template get<static_cast<unsigned>(json_type::array_t)>()));
+        if (parent_element.contains (key))
+          {
+            const auto &child_element = parent_element.at (key);
+            return std::make_optional<std::nullptr_t> (
+                std::get<std::nullptr_t> (child_element.value));
+          }
       }
-    } catch (const std::exception& ex) {
-      if (error_stream) {
-        *error_stream << ex.what();
+    catch (const std::exception &ex)
+      {
+        if (error_stream)
+          {
+            *error_stream << ex.what ();
+          }
       }
-    }
 
     return std::nullopt;
   }
 
-  std::optional<std::reference_wrapper<std::basic_string<CharType>>>
-  get_json_element_as_json_string(const std::basic_string<CharType>& key,
-                                  std::ostream* error_stream = nullptr) const {
-    if (!is_json_object(value))
-      return std::nullopt;
-    try {
-      const auto& parent_element =
-          value.template get<static_cast<unsigned>(json_type::object_t)>();
-
-      if (parent_element.contains(key)) {
-        const auto& child_element = parent_element.at(key);
-        return std::make_optional<
-            std::reference_wrapper<std::basic_string<CharType>>>(std::cref(
-            child_element
-                .template get<static_cast<unsigned>(json_type::string_t)>()));
-      }
-    } catch (const std::exception& ex) {
-      if (error_stream) {
-        *error_stream << ex.what();
-      }
-    }
-
-    return std::nullopt;
-  }
-
-  std::optional<double> get_json_element_as_json_number(
-      const std::basic_string<CharType>& key,
-      std::ostream* error_stream = nullptr) const {
-    if (!is_json_object(value))
-      return std::nullopt;
-    try {
-      const auto& parent_element =
-          value.template get<static_cast<unsigned>(json_type::object_t)>();
-
-      if (parent_element.contains(key)) {
-        const auto& child_element = parent_element.at(key);
-        return std::make_optional<double>(
-            child_element
-                .template get<static_cast<unsigned>(json_type::number_t)>());
-      }
-    } catch (const std::exception& ex) {
-      if (error_stream) {
-        *error_stream << ex.what();
-      }
-    }
-
-    return std::nullopt;
-  }
-
-  std::optional<bool> get_json_element_as_json_boolean(
-      const std::basic_string<CharType>& key,
-      std::ostream* error_stream = nullptr) const {
-    if (!is_json_object(value))
-      return std::nullopt;
-    try {
-      const auto& parent_element =
-          value.template get<static_cast<unsigned>(json_type::object_t)>();
-
-      if (parent_element.contains(key)) {
-        const auto& child_element = parent_element.at(key);
-        return std::make_optional<bool>(
-            child_element
-                .template get<static_cast<unsigned>(json_type::boolean_t)>());
-      }
-    } catch (const std::exception& ex) {
-      if (error_stream) {
-        *error_stream << ex.what();
-      }
-    }
-
-    return std::nullopt;
-  }
-
-  std::optional<std::nullptr_t> get_json_element_as_json_null(
-      const std::basic_string<CharType>& key,
-      std::ostream* error_stream = nullptr) const {
-    if (!is_json_object(value))
-      return std::nullopt;
-    try {
-      const auto& parent_element =
-          value.template get<static_cast<unsigned>(json_type::object_t)>();
-
-      if (parent_element.contains(key)) {
-        const auto& child_element = parent_element.at(key);
-        return std::make_optional<std::nullptr_t>(
-            child_element
-                .template get<static_cast<unsigned>(json_type::null_t)>());
-      }
-    } catch (const std::exception& ex) {
-      if (error_stream) {
-        *error_stream << ex.what();
-      }
-    }
-
-    return std::nullopt;
-  }
-
-  json_type get_json_element_type() const noexcept {
-    if (get_if<std::unordered_map<std::basic_string<CharType>, Json>>(&value))
+  constexpr json_type
+  get_json_element_type () const noexcept
+  {
+    if (get_if<std::unordered_map<std::string, Json> > (&value))
       return json_type::object_t;
 
-    if (std::get_if<std::vector<Json>>(&value))
+    if (std::get_if<std::vector<Json> > (&value))
       return json_type::array_t;
 
-    if (std::get_if<std::basic_string<CharType>>(&value))
+    if (std::get_if<std::string> (&value))
       return json_type::string_t;
 
-    if (std::get_if<std::get_if<double>>(&value))
+    if (std::get_if<double> (&value))
       return json_type::number_t;
 
-    if (std::get_if<std::get_if<bool>>(&value))
+    if (std::get_if<bool> (&value))
       return json_type::boolean_t;
 
     return json_type::null_t;
   }
 
-  bool is_json_object() const noexcept {
-    return std::get_if<std::unordered_map<std::basic_string<CharType>, Json>>(
-               &value) != nullptr;
+  constexpr bool
+  is_json_object () const noexcept
+  {
+    return std::get_if<std::unordered_map<std::string, Json> > (&value)
+           != nullptr;
   }
 
-  bool is_json_array() const noexcept {
-    return std::get_if<std::vector<Json>>(&value) != nullptr;
+  constexpr bool
+  is_json_array () const noexcept
+  {
+    return std::get_if<std::vector<Json> > (&value) != nullptr;
   }
 
-  bool is_json_string() const noexcept {
-    return std::get_if<std::basic_string<CharType>>(&value) != nullptr;
+  constexpr bool
+  is_json_string () const noexcept
+  {
+    return std::get_if<std::string> (&value) != nullptr;
   }
 
-  bool is_json_number() const noexcept {
-    return std::get_if<double>(&value) != nullptr;
+  constexpr bool
+  is_json_number () const noexcept
+  {
+    return std::get_if<double> (&value) != nullptr;
   }
 
-  bool is_json_boolean() const noexcept {
-    return std::get_if<bool>(&value) != nullptr;
+  constexpr bool
+  is_json_boolean () const noexcept
+  {
+    return std::get_if<bool> (&value) != nullptr;
   }
 
-  bool is_json_null() const noexcept {
-    return std::get_if<std::nullptr_t>(&value) != nullptr;
+  constexpr bool
+  is_json_null () const noexcept
+  {
+    return std::get_if<std::nullptr_t> (&value) != nullptr;
   }
 
- private:
+  // accessor method Json::at(key)
+  Json &
+  at (const std::string &key)
+  {
+    return get_json_element_if_exists (key);
+  }
+
+  const Json &
+  at (const std::string &key) const
+  {
+    return get_json_element_if_exists (key);
+  }
+
+  // Json& operator[]
+  Json &
+  operator[] (const std::string &key)
+  {
+    return get_json_element (key);
+  }
+
+  // const Json& operator[]
+  const Json &
+  operator[] (const std::string &key) const
+  {
+    return get_json_element (key);
+  }
+
+private:
   JSONValue value;
-
-  static Json parseValue(const std::basic_string<CharType>& str, size_t& pos) {
-    skip_whitespace(str, pos);
-
-    if (pos >= str.size()) {
-      throw std::runtime_error("Unexpected end of json data!");
-    }
-
-    if (str[pos] == static_cast<CharType>('{'))
-      return parse_json_object(str, pos);
-    if (str[pos] == static_cast<CharType>('['))
-      return parse_json_array(str, pos);
-    if (str[pos] == static_cast<CharType>('"'))
-      return parse_json_string(str, pos);
-    if (std::isdigit(str[pos]) || str[pos] == DASH_CHAR)
-      return parse_json_number(str, pos);
-
-    if (str.compare(pos, TRUE_STRING_LEN, TRUE_STRING) == 0) {
-      pos += TRUE_STRING_LEN;
-      return Json(true);
-    }
-    if (str.compare(pos, FALSE_STRING_LEN, FALSE_STRING) == 0) {
-      pos += FALSE_STRING_LEN;
-      return Json(false);
-    }
-
-    if (str.compare(pos, NULL_STRING_LEN, NULL_STRING) == 0) {
-      pos += NULL_STRING_LEN;
-      return Json(nullptr);
-    }
-
-    throw std::runtime_error("Invalid json value!");
-  }
-
-  static Json parse_json_object(const std::basic_string<CharType>& str,
-                                size_t& pos) {
-    std::unordered_map<std::basic_string<CharType>, Json> json_object;
-    ++pos;
-    skip_whitespace(str, pos);
-    while (pos < str.size() && str[pos] != static_cast<CharType>('}')) {
-      std::basic_string<CharType> key{parse_json_string(str, pos)};
-      skip_whitespace(str, pos);
-      if (str[pos] != static_cast<CharType>(':'))
-        throw std::runtime_error("Expected ':' in JSON object!");
-      ++pos;
-      Json temp_value = parseValue(str, pos);
-      json_object[std::move(key)] = std::move(temp_value);
-      skip_whitespace(str, pos);
-      if (str[pos] == static_cast<CharType>(','))
-        ++pos;
-      skip_whitespace(str, pos);
-    }
-    if (pos >= str.size() || str[pos] != static_cast<CharType>('}'))
-      throw std::runtime_error("Expected '}' in JSON object!");
-    ++pos;
-    return json_object;
-  }
-
-  static Json parse_json_array(const std::basic_string<CharType>& str,
-                               size_t& pos) {
-    std::vector<Json> json_array;
-    ++pos;
-    skip_whitespace(str, pos);
-    while (pos < str.size() && str[pos] != static_cast<CharType>(']')) {
-      json_array.push_back(parseValue(str, pos));
-      skip_whitespace(str, pos);
-      if (str[pos] == static_cast<CharType>(','))
-        ++pos;
-      skip_whitespace(str, pos);
-    }
-    if (pos >= str.size() || str[pos] != static_cast<CharType>(']'))
-      throw std::runtime_error("Expected ']' in JSON array!");
-    ++pos;
-    return json_array;
-  }
-
-  static std::basic_string<CharType> parse_json_string(
-      const std::basic_string<CharType>& str,
-      size_t& pos) {
-    if (str[pos] != static_cast<CharType>('"'))
-      throw std::runtime_error("Expected '\"' for json string data!");
-    ++pos;
-    std::basic_string<CharType> result;
-    while (pos < str.size() && str[pos] != static_cast<CharType>('"')) {
-      result.push_back(str[pos]);
-      ++pos;
-    }
-    if (pos >= str.size() || str[pos] != static_cast<CharType>('"'))
-      throw std::runtime_error("Unterminated json string data!");
-    ++pos;
-    return result;
-  }
-
-  static Json parse_json_number(const std::basic_string<CharType>& str,
-                                size_t& pos) {
-    size_t start{pos};
-    if (str[pos] == static_cast<CharType>('-'))
-      ++pos;
-    while (pos < str.size() &&
-           (std::isdigit(str[pos]) || str[pos] == static_cast<CharType>('.')))
-      ++pos;
-    return std::stod(str.substr(start, pos - start));
-  }
-
-  static void skip_whitespace(const std::basic_string<CharType>& str,
-                              size_t& pos) {
-    while (pos < str.size() && is_whitespace(str[pos]))
-      ++pos;
-  }
-
-  /*template <typename T>
-  T get() const {
-          return std::get<T>(value);
-  }*/
-
-  static bool is_whitespace(CharType ch) {
-    static constexpr const std::array<bool, 1 << (sizeof(CharType) * 8u)>
-        whitespaces = []() consteval {
-          std::array<bool, 1 << (sizeof(CharType) * 8u)> chars{};
-          chars[static_cast<unsigned>(' ')] = true;
-          chars[static_cast<unsigned>('\t')] = true;
-          chars[static_cast<unsigned>('\n')] = true;
-          chars[static_cast<unsigned>('\r')] = true;
-          chars[static_cast<unsigned>('\f')] = true;
-          chars[static_cast<unsigned>('\v')] = true;
-          return chars;
-        }();
-    return whitespaces[static_cast<unsigned>(ch)];
-  }
-
-  static void print_value(const JSONValue& val,
-                          std::basic_ostream<CharType>& os,
-                          int indent,
-                          int level) {
-    std::visit(
-        [&](const auto& variant_value) {
-          print_helper(variant_value, os, indent, level);
-        },
-        val);
-  }
-
-  static void print_helper(std::nullptr_t,
-                           std::basic_ostream<CharType>& os,
-                           int,
-                           int) {
-    os << "null";
-  }
-  static void print_helper(bool b, std::basic_ostream<CharType>& os, int, int) {
-    os << (b ? "true" : "false");
-  }
-  static void print_helper(double d,
-                           std::basic_ostream<CharType>& os,
-                           int,
-                           int) {
-    os << d;
-  }
-  static void print_helper(const std::basic_string<CharType>& s,
-                           std::basic_ostream<CharType>& os,
-                           int,
-                           int) {
-    os << static_cast<CharType>('"') << s << static_cast<CharType>('"');
-  }
-
-  static void print_helper(const std::vector<Json>& json_array,
-                           std::basic_ostream<CharType>& os,
-                           int indent,
-                           int level) {
-    os << static_cast<CharType>('[') << static_cast<CharType>('\n');
-    for (const auto& el : json_array) {
-      os << std::basic_string<CharType>((level + 1) * indent,
-                                        static_cast<CharType>(' '));
-      print_value(el.value, os, indent, level + 1);
-      os << static_cast<CharType>(',') << static_cast<CharType>('\n');
-    }
-    os << std::basic_string<CharType>(level * indent,
-                                      static_cast<CharType>(' '))
-       << static_cast<CharType>(']');
-  }
-
-  static void print_helper(
-      const std::unordered_map<std::basic_string<CharType>, Json>& json_object,
-      std::basic_ostream<CharType>& os,
-      int indent,
-      int level) {
-    os << static_cast<CharType>('{') << static_cast<CharType>('\n');
-    for (const auto& [json_key, json_value] : json_object) {
-      os << std::basic_string<CharType>((level + 1) * indent,
-                                        static_cast<CharType>(' '))
-         << static_cast<CharType>('"') << json_key << static_cast<CharType>('"')
-         << static_cast<CharType>(':') << static_cast<CharType>(' ');
-      print_value(json_value.value, os, indent, level + 1);
-      os << static_cast<CharType>(',') << static_cast<CharType>('\n');
-    }
-    os << std::basic_string<CharType>(level * indent,
-                                      static_cast<CharType>(' '))
-       << static_cast<CharType>('}');
-  }
-
-  static constexpr const CharType* get_true_string() {
-    if constexpr (std::is_same_v<CharType, char>) {
-      return "true";
-    } else if constexpr (std::is_same_v<CharType, wchar_t>) {
-      return L"true";
-    } else
-      return "true";
-  }
-
-  static constexpr const CharType* get_false_string() noexcept {
-    if constexpr (std::is_same_v<CharType, char>) {
-      return "false";
-    } else if constexpr (std::is_same_v<CharType, wchar_t>) {
-      return L"false";
-    } else
-      return "false";
-  }
-
-  static constexpr const CharType* get_null_string() noexcept {
-    if constexpr (std::is_same_v<CharType, char>) {
-      return "null";
-    } else if constexpr (std::is_same_v<CharType, wchar_t>) {
-      return L"null";
-    } else
-      return "null";
-  }
-
-  inline static constexpr CharType DASH_CHAR{static_cast<CharType>('-')};
-  inline static constexpr const CharType* TRUE_STRING{get_true_string()};
-  inline static constexpr const CharType* FALSE_STRING{get_false_string()};
-  inline static constexpr const CharType* NULL_STRING{get_null_string()};
-  inline static constexpr const size_t TRUE_STRING_LEN{len(TRUE_STRING)};
-  inline static constexpr const size_t FALSE_STRING_LEN{len(FALSE_STRING)};
-  inline static constexpr const size_t NULL_STRING_LEN{len(NULL_STRING)};
 };
 
-using json = Json<char>;
-using wjson = Json<wchar_t>;
+struct result_type
+{
+  std::optional<Json> result_value;
+  status result_status;
+  std::string result_string;
+  explicit result_type (std::optional<Json> res_value,
+                        status res_status = status::success,
+                        std::string res_string = {})
+      : result_value{ std::move (res_value) }, result_status (res_status),
+        result_string{ std::move (res_string) }
+  {
+  }
+};
 
-json operator"" _json(const char* json_string, const size_t) {
-  return json::parse(json_string);
+inline result_type
+operator"" _json (const char *json_string, const size_t)
+{
+  return parse (json_string);
 }
 
-wjson operator"" _json(const wchar_t* json_string, const size_t) {
-  return wjson::parse(json_string);
-}
+} // namespace simple_json
 
-}  // namespace simple_json
-
-#endif  // SIMPLE_JSON_H
+#endif // SIMPLE_JSON_H
