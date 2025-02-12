@@ -328,7 +328,8 @@ print_helper (const std::unordered_map<std::string, Json> &json_object,
     {
       os << std::string ((level + 1) * indent, ' ') << '"' << json_key << '"'
          << ": ";
-      print_value (json_value.get_json_value_as_variant (), os, indent, level + 1);
+      print_value (json_value.get_json_value_as_variant (), os, indent,
+                   level + 1);
       os << ",\n";
     }
   os << std::string (level * indent, ' ') << '}';

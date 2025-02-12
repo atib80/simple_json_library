@@ -65,8 +65,6 @@ using JSONValue
 struct result_type;
 
 result_type parse (const std::string &input);
-std::ostream &operator<< (std::ostream &os, const Json &json);
-std::istream &operator>> (std::istream &is, Json &json);
 
 result_type parseValue (const std::string &str, size_t &pos);
 result_type parse_json_object (const std::string &str, size_t &pos);
@@ -83,6 +81,9 @@ void print_helper (const std::vector<Json> &json_array, std::ostream &os,
                    int indent, int level);
 void print_helper (const std::unordered_map<std::string, Json> &json_object,
                    std::ostream &os, int indent, int level);
+
+std::ostream &operator<< (std::ostream &os, const Json &json);
+std::istream &operator>> (std::istream &is, Json &json);
 
 enum class status
 {
@@ -106,16 +107,26 @@ public:
   constexpr explicit Json () : value{ nullptr } {}
   constexpr explicit Json (std::nullptr_t) : value{ nullptr } {}
   constexpr explicit Json (const bool b) : value{ b } {}
-  constexpr explicit Json (const int n) : Json(static_cast<double>(n)) {}
+  constexpr explicit Json (const int n) : Json (static_cast<double> (n)) {}
   constexpr explicit Json (const double d) : value{ d } {}
-  constexpr explicit Json (const char* s) : value{ std::string{s} } {}
+  constexpr explicit Json (const char *s) : value{ std::string{ s } } {}
   constexpr explicit Json (const std::string &s) : value{ s } {}
-  constexpr explicit Json (const std::vector<Json> &values) : value{ values } {}
-  constexpr explicit Json (std::vector<Json> &&values) : value{ std::move (values) } {}
+  constexpr explicit Json (const std::vector<Json> &values) : value{ values }
+  {
+  }
+  constexpr explicit Json (std::vector<Json> &&values)
+      : value{ std::move (values) }
+  {
+  }
   // constexpr Json (const std::initializer_list<Json> values)
   //     : value{ std::vector<Json> (values) } {}
-  explicit Json (const std::unordered_map<std::string, Json> &o) : value{ o } {}
-  explicit Json (std::unordered_map<std::string, Json> &&o) : value{ std::move (o) } {}
+  explicit Json (const std::unordered_map<std::string, Json> &o) : value{ o }
+  {
+  }
+  explicit Json (std::unordered_map<std::string, Json> &&o)
+      : value{ std::move (o) }
+  {
+  }
 
   std::optional<std::nullptr_t>
   get_json_value_as_null () const
@@ -201,7 +212,7 @@ public:
     return std::nullopt;
   }
 
-  const JSONValue&
+  const JSONValue &
   get_json_value_as_variant () const noexcept
   {
     return value;
@@ -291,205 +302,116 @@ public:
 
   std::optional<
       std::reference_wrapper<const std::unordered_map<std::string, Json> > >
-  get_json_element_as_json_object (const std::string &key,
-                                   std::ostream *error_stream = nullptr) const
+  get_child_as_json_object (const std::string &key) const
   {
 
     if (!is_json_object ())
-      {
-        if (key.empty () && is_json_object ())
-          return std::make_optional (std::cref (
-              std::get<std::unordered_map<std::string, Json> > (value)));
-        return std::nullopt;
-      }
-    try
-      {
-        const auto &parent_element
-            = std::get<std::unordered_map<std::string, Json> > (value);
+      return std::nullopt;
 
-        if (parent_element.contains (key))
-          {
-            const auto &child_element = parent_element.at (key);
-            return std::make_optional (
-                std::cref (std::get<std::unordered_map<std::string, Json> > (
-                    child_element.value)));
-          }
-      }
-    catch (const std::exception &ex)
+    const auto &parent_element
+        = std::get<std::unordered_map<std::string, Json> > (value);
+
+    if (parent_element.contains (key))
       {
-        if (error_stream)
-          {
-            *error_stream << ex.what ();
-          }
+        const auto &child_element = parent_element.at (key);
+        return std::make_optional (
+            std::cref (std::get<std::unordered_map<std::string, Json> > (
+                child_element.value)));
       }
 
-    return {};
+    return std::nullopt;
   }
 
   std::optional<std::reference_wrapper<const std::vector<Json> > >
-  get_json_element_as_json_array (const std::string &key,
-                                  std::ostream *error_stream = nullptr) const
+  get_child_as_json_array (const std::string &key) const
   {
     if (!is_json_object ())
-      {
-        if (key.empty () && is_json_array ())
-          return std::make_optional (
-              std::cref (std::get<std::vector<Json> > (value)));
-        return std::nullopt;
-      }
-    try
-      {
-        const auto &parent_element
-            = std::get<std::unordered_map<std::string, Json> > (value);
+      return std::nullopt;
 
-        if (parent_element.contains (key))
-          {
-            const auto &child_element = parent_element.at (key);
-            return std::make_optional (std::cref (
-                std::get<std::vector<Json> > (child_element.value)));
-          }
-      }
-    catch (const std::exception &ex)
+    const auto &parent_element
+        = std::get<std::unordered_map<std::string, Json> > (value);
+
+    if (parent_element.contains (key))
       {
-        if (error_stream)
-          {
-            *error_stream << ex.what ();
-          }
+        const auto &child_element = parent_element.at (key);
+        return std::make_optional (
+            std::cref (std::get<std::vector<Json> > (child_element.value)));
       }
 
-    return {};
+    return std::nullopt;
   }
 
-  std::optional<std::string>
-  get_json_element_as_json_string (const std::string &key,
-                                   std::ostream *error_stream = nullptr) const
+  std::optional<std::reference_wrapper<const std::string> >
+  get_child_as_json_string (const std::string &key) const
   {
-    static constexpr std::nullptr_t null_value{};
     if (!is_json_object ())
-      {
-        if (key.empty () && is_json_string ())
-          return std::make_optional<std::string> (
-              std::get<std::string> (value));
-        return std::nullopt;
-      }
-    try
-      {
-        const auto &parent_element
-            = std::get<std::unordered_map<std::string, Json> > (value);
+      return std::nullopt;
 
-        if (parent_element.contains (key))
-          {
-            const auto &child_element = parent_element.at (key);
-            return std::make_optional (
-                std::get<std::string> (child_element.value));
-          }
-      }
-    catch (const std::exception &ex)
+    const auto &parent_element
+        = std::get<std::unordered_map<std::string, Json> > (value);
+
+    if (parent_element.contains (key))
       {
-        if (error_stream)
-          {
-            *error_stream << ex.what ();
-          }
+        const auto &child_element = parent_element.at (key);
+        return std::make_optional (
+            std::cref (std::get<std::string> (child_element.value)));
       }
 
-    return null_value;
+    return std::nullopt;
   }
 
   std::optional<double>
-  get_json_element_as_json_number (const std::string &key,
-                                   std::ostream *error_stream = nullptr) const
+  get_child_as_json_number (const std::string &key) const
   {
 
     if (!is_json_object ())
-      {
-        if (key.empty () && is_json_number ())
-          return std::make_optional<double> (std::get<double> (value));
-        return std::nullopt;
-      }
-    try
-      {
-        const auto &parent_element
-            = std::get<std::unordered_map<std::string, Json> > (value);
+      return std::nullopt;
 
-        if (parent_element.contains (key))
-          {
-            const auto &child_element = parent_element.at (key);
-            return std::make_optional<double> (
-                std::get<double> (child_element.value));
-          }
-      }
-    catch (const std::exception &ex)
+    const auto &parent_element
+        = std::get<std::unordered_map<std::string, Json> > (value);
+
+    if (parent_element.contains (key))
       {
-        if (error_stream)
-          {
-            *error_stream << ex.what ();
-          }
+        const auto &child_element = parent_element.at (key);
+        return std::make_optional<double> (
+            std::get<double> (child_element.value));
       }
 
     return std::nullopt;
   }
 
   std::optional<bool>
-  get_json_element_as_json_boolean (const std::string &key,
-                                    std::ostream *error_stream = nullptr) const
+  get_child_as_json_boolean (const std::string &key) const
   {
     if (!is_json_object ())
-      {
-        if (key.empty () && is_json_boolean ())
-          return std::make_optional<bool> (std::get<bool> (value));
-        return std::nullopt;
-      }
-    try
-      {
-        const auto &parent_element
-            = std::get<std::unordered_map<std::string, Json> > (value);
+      return std::nullopt;
 
-        if (parent_element.contains (key))
-          {
-            const auto &child_element = parent_element.at (key);
-            return std::make_optional<bool> (
-                std::get<bool> (child_element.value));
-          }
-      }
-    catch (const std::exception &ex)
+    const auto &parent_element
+        = std::get<std::unordered_map<std::string, Json> > (value);
+
+    if (parent_element.contains (key))
       {
-        if (error_stream)
-          {
-            *error_stream << ex.what ();
-          }
+        const auto &child_element = parent_element.at (key);
+        return std::make_optional<bool> (std::get<bool> (child_element.value));
       }
 
     return std::nullopt;
   }
 
   std::optional<std::nullptr_t>
-  get_json_element_as_json_null (const std::string &key,
-                                 std::ostream *error_stream = nullptr) const
+  get_child_element_as_json_null (const std::string &key) const
   {
     if (!is_json_object ())
-      {
-        if (key.empty () && is_json_null ())
-          return std::make_optional<std::nullptr_t> (nullptr);
-        return std::nullopt;
-      }
-    try
-      {
-        const auto &parent_element
-            = std::get<std::unordered_map<std::string, Json> > (value);
+      return std::nullopt;
 
-        if (parent_element.contains (key))
-          {
-            const auto &child_element = parent_element.at (key);
-            return std::make_optional<std::nullptr_t> (
-                std::get<std::nullptr_t> (child_element.value));
-          }
-      }
-    catch (const std::exception &ex)
+    const auto &parent_element
+        = std::get<std::unordered_map<std::string, Json> > (value);
+
+    if (parent_element.contains (key))
       {
-        if (error_stream)
-          {
-            *error_stream << ex.what ();
-          }
+        const auto &child_element = parent_element.at (key);
+        return std::make_optional<std::nullptr_t> (
+            std::get<std::nullptr_t> (child_element.value));
       }
 
     return std::nullopt;
