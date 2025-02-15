@@ -103,11 +103,185 @@ enum class json_type : unsigned
 
 class Json
 {
+
 public:
+  class iterator
+  {
+    std::unordered_map<const std::string, Json>::iterator json_object_iterator;
+
+  public:
+    explicit iterator (std::nullptr_t) : json_object_iterator (nullptr) {}
+    explicit iterator (std::reference_wrapper<Json> json)
+        : json_object_iterator{
+            json.get ().get_json_value_as_object ().value ().get ().begin ()
+          }
+    {
+    }
+
+    iterator &
+    operator++ ()
+    {
+      ++json_object_iterator;
+      return *this;
+    }
+
+    iterator
+    operator++ (int)
+    {
+      iterator tmp{ *this };
+      ++(*this);
+      return tmp;
+    }
+
+    std::pair<const std::string, Json> &
+    operator* ()
+    {
+      return *json_object_iterator;
+    }
+
+    const std::pair<const std::string, Json> &
+    operator* () const
+    {
+      return *json_object_iterator;
+    }
+
+    std::unordered_map<const std::string, Json>::iterator &
+    operator->()
+    {
+      return json_object_iterator;
+    }
+
+    const std::unordered_map<const std::string, Json>::iterator &
+    operator->() const
+    {
+      return json_object_iterator;
+    }
+
+    bool
+    operator== (const iterator &rhs) const noexcept
+    {
+      return json_object_iterator == rhs.json_object_iterator;
+    }
+
+    bool
+    operator!= (const iterator &rhs) const noexcept
+    {
+      return !(*this == rhs);
+    }
+  };
+
+  class const_iterator
+  {
+    std::unordered_map<std::string, Json>::const_iterator json_object_iterator;
+
+  public:
+    explicit const_iterator (std::nullptr_t) : json_object_iterator (nullptr)
+    {
+    }
+    explicit const_iterator (std::reference_wrapper<const Json> json)
+        : json_object_iterator{
+            json.get ().get_json_value_as_object ().value ().get ().cbegin ()
+          }
+    {
+    }
+
+    const_iterator &
+    operator++ ()
+    {
+      ++json_object_iterator;
+      return *this;
+    }
+
+    const_iterator
+    operator++ (int)
+    {
+      const_iterator tmp{ *this };
+      ++(*this);
+      return tmp;
+    }
+
+    const std::pair<const std::string, Json> &
+    operator* () const
+    {
+      return *json_object_iterator;
+    }
+
+    const std::unordered_map<const std::string, Json>::const_iterator &
+    operator->() const
+    {
+      return json_object_iterator;
+    }
+
+    bool
+    operator== (const const_iterator &rhs) const noexcept
+    {
+      return json_object_iterator == rhs.json_object_iterator;
+    }
+
+    bool
+    operator!= (const const_iterator &rhs) const noexcept
+    {
+      return !(*this == rhs);
+    }
+  };
+
+  iterator
+  begin ()
+  {
+    static Json single_elem_json_object;
+    if (is_json_object ())
+      return iterator{ std::ref (*this) };
+    single_elem_json_object = Json{ std::unordered_map<std::string, Json>{
+        { "", Json (*this) } } };
+    return iterator{ std::ref (single_elem_json_object) };
+  }
+
+  const_iterator
+  begin () const
+  {
+    static Json single_elem_json_object;
+    if (is_json_object ())
+      return const_iterator{ std::cref (std::as_const (*this)) };
+    single_elem_json_object = Json{ std::unordered_map<std::string, Json>{
+        { "", Json (*this) } } };
+    return const_iterator{ std::cref (
+        std::as_const (single_elem_json_object)) };
+  }
+
+  iterator
+  end ()
+  {
+    return iterator{ nullptr };
+  }
+
+  const_iterator
+  end () const
+  {
+    return const_iterator{ nullptr };
+  }
+
+  const_iterator
+  cbegin () const
+  {
+    static Json single_elem_json_object;
+    if (is_json_object ())
+      return const_iterator{ std::ref (std::as_const (*this)) };
+    single_elem_json_object = Json{ std::unordered_map<std::string, Json>{
+        { "", Json (*this) } } };
+    return const_iterator{ std::cref (
+        std::as_const (single_elem_json_object)) };
+  }
+
+  const_iterator
+  cend () const
+  {
+    return const_iterator{ nullptr };
+  }
+
   constexpr explicit Json () : value{ nullptr } {}
   constexpr explicit Json (std::nullptr_t) : value{ nullptr } {}
   constexpr explicit Json (const bool b) : value{ b } {}
-  constexpr explicit Json (const int n) : Json (static_cast<double> (n)) {}
+  constexpr explicit Json (const int n) : value (static_cast<double> (n)) {}
   constexpr explicit Json (const double d) : value{ d } {}
   constexpr explicit Json (const char *s) : value{ std::string{ s } } {}
   constexpr explicit Json (const std::string &s) : value{ s } {}
@@ -118,8 +292,11 @@ public:
       : value{ std::move (values) }
   {
   }
-  // constexpr Json (const std::initializer_list<Json> values)
-  //     : value{ std::vector<Json> (values) } {}
+  constexpr
+  Json (const std::initializer_list<Json> values)
+      : value{ std::vector<Json> (values) }
+  {
+  }
   explicit Json (const std::unordered_map<std::string, Json> &o) : value{ o }
   {
   }
@@ -502,6 +679,20 @@ public:
     return get_json_element (key);
   }
 
+  template <typename T>
+  const T &
+  as () const
+  {
+    return std::get<T> (value);
+  }
+
+  template <typename T>
+  T &
+  as ()
+  {
+    return std::get<T> (value);
+  }
+
 private:
   JSONValue value;
 };
@@ -524,6 +715,59 @@ inline result_type
 operator"" _json (const char *json_string, const size_t)
 {
   return parse (json_string);
+}
+
+inline Json::iterator
+begin (Json &json)
+{
+  static Json single_elem_json_object;
+  if (json.is_json_object ())
+    return Json::iterator{ std::ref (json) };
+  single_elem_json_object
+      = Json{ std::unordered_map<std::string, Json>{ { "", Json (json) } } };
+  return Json::iterator{ std::ref (single_elem_json_object) };
+}
+
+inline Json::const_iterator
+begin (const Json &json)
+{
+  static Json single_elem_json_object;
+  if (json.is_json_object ())
+    return Json::const_iterator{ std::cref (std::as_const (json)) };
+  single_elem_json_object
+      = Json{ std::unordered_map<std::string, Json>{ { "", Json (json) } } };
+  return Json::const_iterator{ std::cref (
+      std::as_const (single_elem_json_object)) };
+}
+
+inline Json::iterator
+end (Json &json)
+{
+  return Json::iterator{ nullptr };
+}
+
+inline Json::const_iterator
+end (const Json &json)
+{
+  return Json::const_iterator{ nullptr };
+}
+
+inline Json::const_iterator
+cbegin (const Json &json)
+{
+  static Json single_elem_json_object;
+  if (json.is_json_object ())
+    return Json::const_iterator{ std::cref (std::as_const (json)) };
+  single_elem_json_object
+      = Json{ std::unordered_map<std::string, Json>{ { "", Json (json) } } };
+  return Json::const_iterator{ std::cref (
+      std::as_const (single_elem_json_object)) };
+}
+
+inline Json::const_iterator
+cend (const Json &json)
+{
+  return Json::const_iterator{ nullptr };
 }
 
 } // namespace simple_json
