@@ -93,11 +93,11 @@ operator>> (std::istream &is, Json &json)
   if (!open_curly_braces.empty () || !open_brackets.empty ())
     throw std::invalid_argument (
         "Invalid JSON syntax: too many open curly braces or brackets!");
-
-  auto [result_json, result_status, result_message] = parse (buffer);
-  if (result_status == status::fail || !result_json.has_value ())
-    throw std::invalid_argument{ result_message };
-  json = std::move (result_json.value ());
+  result_type result{parse(buffer)};
+  // auto [result_json, result_status, result_message] = parse (buffer);
+  if (result.result_status == status::fail || !result.result_value.has_value ())
+    throw std::invalid_argument{ result.result_string };
+  json = std::move(result.result_value.value ());
   return is;
 }
 

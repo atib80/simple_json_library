@@ -80,7 +80,7 @@ TEST (simple_json_library, creating_a_json_object_with_string)
 TEST (simple_json_library, creating_a_json_object_with_array)
 {
   static constexpr double epsilon{ 0.000001 };
-  constexpr std::array<Json, 5> array_elements{ Json{ 1.1 }, Json{ 2.2 },
+  std::array<Json, 5> array_elements{ Json{ 1.1 }, Json{ 2.2 },
                                                 Json{ 3.3 }, Json{ 4.4 },
                                                 Json{ 5.5 } };
   std::vector<Json> arr (std::cbegin (array_elements),
