@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.17)
+cmake_minimum_required(VERSION 3.16)
 
 set(this simple_json_parser)
 project(${this} VERSION 0.0.1 
@@ -18,8 +18,6 @@ add_library(${this} STATIC ${header_files} ${source_files})
 target_include_directories(${this} PUBLIC include)
 
 include(CTest)
-
-# enable_testing()
 
 add_subdirectory(googletest)
 

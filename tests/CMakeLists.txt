@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.17)
+cmake_minimum_required(VERSION 3.16)
 
 set(this_tests simple_json_parser_tests)
 project(${this_tests})
@@ -13,5 +13,4 @@ if(BUILD_TESTING)
   target_link_libraries(${this_tests} PRIVATE GTest::gtest_main)
   include(GoogleTest)
   gtest_discover_tests(${this_tests})
-  #add_test(NAME tests COMMAND ${this_tests})
 endif()
